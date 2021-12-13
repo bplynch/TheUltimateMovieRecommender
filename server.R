@@ -1,74 +1,25 @@
-load("System1.rda") 
-load("System2.rda")
-load("movieIds.rda")
+models.UBCF = readRDS('UBCF.rds')
+models.IBCF = readRDS('IBCF.rds')
 
 OPTIMAL_N = 10
-CF_PARAMETERS = list(k=500, method="pearson", normalize="center")
 library(dplyr)
 
-ratings = read.csv('ratings.dat', 
-                   sep = ':',
-                   colClasses = c('integer', 'NULL'), 
-                   header = FALSE)
+ratings = read.csv(
+  'ratings.dat', 
+  sep = ':',
+  colClasses = c('integer', 'NULL'), 
+  header = FALSE
+)
 colnames(ratings) = c('UserID', 'MovieID', 'Rating', 'Timestamp')
 
-get_user_ratings = function(value_list) {
-  dat = data.table(MovieID = sapply(strsplit(names(value_list), "_"), 
-                                    function(x) ifelse(length(x) > 1, x[[2]], NA)),
-                   Rating = unlist(as.character(value_list)))
-  dat = dat[!is.null(Rating) & !is.na(MovieID)]
-  dat[Rating == " ", Rating := 0]
-  dat[, ':=' (MovieID = as.numeric(MovieID), Rating = as.numeric(Rating))]
-  dat = dat[Rating > 0]
-}
-
-# System 1
-
-get_system1_recommendations_MovieID = function(top_n_to_return, genre) {
-  best_movies = get_top_N_movies_data_by_genre(top_n_to_return, genre)
-  return (best_movies$MovieID)
-}
-
-get_top_N_movies_data_by_genre = function(top_n_to_return, genre) {
-  full_movies_data_by_genre = get_full_movies_data_by_genre(genre);
-  ret = full_movies_data_by_genre %>%
-    mutate(final_rank = as.double(ave_ratings_rank + ave_ratings_timestamp_rank + num_ratings_rank)) %>%
-    top_n(top_n_to_return, -((final_rank))) %>%
-    select('MovieID', 'Title', 'final_rank', 'ave_ratings_rank', 'ave_ratings_timestamp_rank', 'num_ratings_rank') %>%
-    arrange(desc(-(final_rank)))
-  
-  return(ret);
-}
-
-get_full_movies_data_by_genre = function(genre_name) {
-  matching_movie_idxs_for_this_genre = genre_matrix[,genre_name] == 1
-  movies_for_this_genre = movies[matching_movie_idxs_for_this_genre,]
-  ratings_by_movie_data = ratings %>% 
-    group_by(MovieID) %>% 
-    summarize(
-      num_ratings = n(), 
-      ave_ratings = round(mean(Rating), dig=4),
-      ave_ratings_timestamp = round(mean(Timestamp), dig=4),
-    );
-  ret = movies_for_this_genre %>%
-    left_join(ratings_by_movie_data, by = 'MovieID') %>%
-    replace(is.na(.), 0) %>% 
-    mutate(ave_ratings_rank = dense_rank(desc(ave_ratings))) %>% 
-    mutate(num_ratings_rank = dense_rank(desc(num_ratings))) %>% 
-    mutate(ave_ratings_timestamp_rank = dense_rank(desc(ave_ratings_timestamp))) %>%
-    arrange(desc(ave_ratings), desc(num_ratings), desc(ave_ratings_timestamp))
-  return(ret);
-}
-
-
-# System 2
-predict_CF = function(active_user) {
-  tmp = matrix(data=NA, 1, length(movieIDs))
-  colnames(tmp) = movieIDs
-  tmp[1, active_user$MovieID] = active_user$Rating
-  r.pred = predict(r.model, as(tmp, "realRatingMatrix"), OPTIMAL_N)
-  return(as(r.pred, "list"))
-}
+i = paste0('u', ratings$UserID)
+j = paste0('m', ratings$MovieID)
+x = ratings$Rating
+tmp = data.frame(i, j, x, stringsAsFactors = T)
+ratings_matrix = sparseMatrix(as.integer(tmp$i), as.integer(tmp$j), x = tmp$x)
+rownames(ratings_matrix) = levels(tmp$i)
+colnames(ratings_matrix) = levels(tmp$j)
+ratings_matrix = new('realRatingMatrix', data = ratings_matrix)
 
 
 # read in data
@@ -80,6 +31,12 @@ movies = data.frame(movies, stringsAsFactors = FALSE)
 colnames(movies) = c('MovieID', 'Title', 'Genres')
 movies$MovieID = as.integer(movies$MovieID)
 movies$Title = iconv(movies$Title, "latin1", "UTF-8")
+
+small_image_url = "https://liangfgithub.github.io/MovieImages/"
+movies$image_url = sapply(
+  movies$MovieID, 
+  function(x) paste0(small_image_url, x, '.jpg?raw=true')
+)
 
 # Get unique movie genres for dropdown
 unique_genres = c()
@@ -95,16 +52,66 @@ for (unsplit_genres in movies$Genres) {
   }
 }
 
-small_image_url = "https://liangfgithub.github.io/MovieImages/"
-movies$image_url = sapply(movies$MovieID, 
-                          function(x) paste0(small_image_url, x, '.jpg?raw=true'))
+get_user_ratings = function(value_list) {
+  dat = data.table(MovieID = sapply(strsplit(names(value_list), "_"), 
+                                    function(x) ifelse(length(x) > 1, x[[2]], NA)),
+                   Rating = unlist(as.character(value_list)))
+  dat = dat[!is.null(Rating) & !is.na(MovieID)]
+  dat[Rating == " ", Rating := 0]
+  dat[, ':=' (MovieID = as.numeric(MovieID), Rating = as.numeric(Rating))]
+  dat = dat[Rating > 0]
+}
 
+# System 1
+get_top_N_movies_data_by_genre = function(N, genre, ratings, movies, small_image_url, min_num_ratings=1000) {
+  ranked_movies = ratings %>% 
+    group_by(MovieID) %>% # group ratings by movie id
+    summarize(
+        num_ratings = n(), 
+        ave_ratings = round(mean(Rating), dig=4),
+        ave_ratings_timestamp = round(mean(Timestamp), dig=4),
+    ) %>%
+    inner_join(movies, by = 'MovieID') %>% # join with other movie data
+    replace(is.na(.), 0) %>% 
+    filter(num_ratings > min_num_ratings, grepl(genre, Genres)) %>% #filter movies with few ratings and filter by genre
+    mutate(ave_ratings_rank = dense_rank(ave_ratings)) %>% 
+    mutate(num_ratings_rank = dense_rank(num_ratings)) %>% 
+    mutate(ave_ratings_timestamp_rank = dense_rank(ave_ratings_timestamp)) %>%
+    arrange(desc(ave_ratings), desc(num_ratings), desc(ave_ratings_timestamp)) %>%
+    mutate(final_rank = as.double(ave_ratings_rank + ave_ratings_timestamp_rank + num_ratings_rank)) %>%
+    top_n(N, (final_rank)) %>%
+    select('MovieID', 'Title', 'final_rank', 'ave_ratings_rank', 'ave_ratings_timestamp_rank', 'num_ratings_rank') %>%
+    arrange(desc((final_rank))) %>%
+  return(ranked_movies)
+}
+
+
+# # System 2
+# predict_CF = function(active_user) {
+#   tmp = matrix(data=NA, 1, length(movieIDs))
+#   colnames(tmp) = movieIDs
+#   tmp[1, active_user$MovieID] = active_user$Rating
+#   r.pred = predict(r.model, as(tmp, "realRatingMatrix"), OPTIMAL_N)
+#   return(as(r.pred, "list"))
+# }
+
+# # System 2
+predict_CF = function(active_user) {
+  active_matrix = matrix(data=NA, 1, ncol(ratings_matrix))
+  colnames(active_matrix) = c(seq.int(1,ncol(ratings_matrix)))
+  active_matrix[1, active_user$MovieID] = active_user$Rating
+  pred = predict(models.IBCF, as(active_matrix, "realRatingMatrix"), OPTIMAL_N)
+  return(as(pred, "list"))
+}
+
+
+# App
 shinyServer(function(input, output, session) {
   # show the books to be rated
   
   output$ratings_book_grid <- renderUI({
     num_rows <- 20
-    num_movies <- 6 # movies per row
+    num_movies <- 5 # movies per row
     
     lapply(1:num_rows, function(i) {
       list(fluidRow(lapply(1:num_movies, function(j) {
@@ -132,10 +139,10 @@ shinyServer(function(input, output, session) {
   
   df_genre <- eventReactive(input$btnGenre, {
     withBusyIndicatorServer("btnGenre", {
-      transition_to_loading_state()
+      #transition_to_loading_state()
       value_list = reactiveValuesToList(input)
       selected_genre = value_list$genreDropdown
-      top_genre_movies = get_top_N_movies_data_by_genre(OPTIMAL_N, selected_genre)
+      top_genre_movies = get_top_N_movies_data_by_genre(OPTIMAL_N, selected_genre, ratings, movies, small_image_url, 1000)
       user_results = (1:10)/10
       recom_genre_results <- data.table(Rank = 1:10, 
                                   MovieID = top_genre_movies$MovieID, 
@@ -147,19 +154,10 @@ shinyServer(function(input, output, session) {
   # Calculate recommendations when the sbumbutton is clicked
   df <- eventReactive(input$btnRating, {
     withBusyIndicatorServer("btnRating", { # showing the busy indicator
-      transition_to_loading_state()
-      
+      #transition_to_loading_state()
       # get the user's rating data
       value_list <- reactiveValuesToList(input)
       user_ratings <- get_user_ratings(value_list)
-      ###
-      # user_ratings
-      # MovieID Rating
-      # 1:       3      5
-      # 2:       2      4
-      # 3:       8      2
-      ###
-      #TODO:  Currently returning first 10 books as recommendation.  Plug in CF algo here.
       user_results = (1:10)/10
       user_predicted_ids = predict_CF(user_ratings) # 
       user_predicted_ids = lapply(user_predicted_ids, function(x) substring(x,2))
@@ -196,7 +194,6 @@ shinyServer(function(input, output, session) {
     num_rows <- 2
     num_movies <- 5
     recom_movie_ids <- df()
-    
     lapply(1:num_rows, function(i) {
       list(fluidRow(lapply(1:num_movies, function(j) {
         movie_idx = i * j
@@ -213,7 +210,6 @@ shinyServer(function(input, output, session) {
         )         
       }))) # columns
     }) # rows
-    
   }) # renderUI function
   
 }) # server function

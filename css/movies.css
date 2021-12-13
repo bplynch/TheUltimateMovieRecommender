@@ -1,7 +1,12 @@
-.rateitems,
+.rateitems{
+   padding-left: 5px;
+   height: 450px;
+   overflow-y: scroll;
+ }
+ 
 .genreitems {
   padding-left: 5px;
-  height: 450px;
+  height: 250px;
   overflow-y: scroll;
 }
 

@@ -11,7 +11,7 @@ source('functions/helpers.R')
 shinyUI(
     dashboardPage(
           skin = "blue",
-          dashboardHeader(title = "The Ultimate Movie Recommender Engine!"),
+          dashboardHeader(title = "Popcorn Time"),
           dashboardSidebar(
             sidebarMenu(
               id = "tabs",
@@ -24,7 +24,7 @@ shinyUI(
                 tabItem(
                   tabName = "genre",
                   fluidRow(
-                    box(width = 12, title = "Step 1: Select Your Favorite Genre", status = "info", solidHeader = TRUE, collapsible = TRUE,
+                    box(width = 12, title = "Step 1: Select A Genre", status = "info", solidHeader = TRUE, collapsible = TRUE,
                         div(class = "genreitems",
                             uiOutput('genres_dropdown')
                         )
@@ -34,10 +34,10 @@ shinyUI(
                     useShinyjs(),
                     box(
                       width = 12, status = "info", solidHeader = TRUE,
-                      title = "Step 2: Discover other movies in this genre that you might like",
+                      title = "Step 2: Find the Most Popular Titles in that Genre",
                       br(),
                       withBusyIndicatorUI(
-                        actionButton("btnGenre", "Click here to get your recommendations!", class = "btn-warning")
+                        actionButton("btnGenre", "Click here to get this Genre's most popular movies!", class = "btn-warning")
                       ),
                       br(),
                       tableOutput("results_by_genre")
