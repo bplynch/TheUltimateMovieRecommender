@@ -1,0 +1,11 @@
+name: moviesrecommender
+title:
+username:
+account: bplynch2
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 5316504
+bundleId: 5365019
+url: https://bplynch2.shinyapps.io/moviesrecommender/
+when: 1639372973.55232
+lastSyncTime: 1639372973.55232
